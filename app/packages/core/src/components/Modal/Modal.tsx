@@ -143,8 +143,7 @@ const SampleModal = () => {
             ),
             disabled: isTag || isLabelTag || isOther,
           };
-
-        case fos.EntryKind.GROUP: {
+        case fos.EntryKind.GROUP:
           return {
             children: (
               <Entries.PathGroup
@@ -157,7 +156,7 @@ const SampleModal = () => {
             ),
             disabled: false,
           };
-        }
+        
         case fos.EntryKind.EMPTY:
           return {
             children: (
