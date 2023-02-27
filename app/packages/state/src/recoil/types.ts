@@ -149,7 +149,11 @@ export namespace State {
   /**
    * @hidden
    */
-  export interface Filter {}
+  export interface Filter {
+    values: string[];
+    isMatching: boolean;
+    exclude: boolean;
+  }
 
   export interface SortBySimilarityParameters {
     brainKey: string;

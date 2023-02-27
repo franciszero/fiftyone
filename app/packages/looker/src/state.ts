@@ -120,6 +120,7 @@ interface BaseOptions {
   filter: (path: string, value: unknown) => boolean;
   coloring: Coloring;
   selectedLabels: string[];
+  selectedLabelTags: string[];
   showConfidence: boolean;
   showControls: boolean;
   showIndex: boolean;
@@ -310,12 +311,14 @@ const DEFAULT_BASE_OPTIONS: BaseOptions = {
   highlight: false,
   activePaths: [],
   selectedLabels: [],
+  selectedLabelTags: [],
   showConfidence: false,
   showControls: true,
   showIndex: false,
   showJSON: false,
   showLabel: false,
   showTooltip: false,
+  showHelp: false,
   onlyShowHoveredLabel: false,
   filter: null,
   coloring: {
