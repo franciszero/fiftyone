@@ -15,7 +15,6 @@ def up(db, dataset_name):
     if app_config is not None:
         sidebar_groups = app_config.get("sidebar_groups", None)
         if sidebar_groups is not None:
-            print("sidebar_groups", sidebar_groups)
             for sidebar_group in sidebar_groups:
                 name = sidebar_group.get("name", None)
                 if name == "tags":
