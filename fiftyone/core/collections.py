@@ -798,11 +798,11 @@ class SampleCollection(object):
         """
         raise NotImplementedError("Subclass must implement view()")
 
-    def iter_samples(self, progress=False, autosave=False, batch_size=None):
+    def iter_samples(self, progress=None, autosave=False, batch_size=None):
         """Returns an iterator over the samples in the collection.
 
         Args:
-            progress (False): whether to render a progress bar tracking the
+            progress (None): whether to render a progress bar tracking the
                 iterator's progress
             autosave (False): whether to automatically save changes to samples
                 emitted by this iterator
@@ -819,7 +819,7 @@ class SampleCollection(object):
     def iter_groups(
         self,
         group_slices=None,
-        progress=False,
+        progress=None,
         autosave=False,
         batch_size=None,
     ):
@@ -827,7 +827,7 @@ class SampleCollection(object):
 
         Args:
             group_slices (None): an optional subset of group slices to load
-            progress (False): whether to render a progress bar tracking the
+            progress (None): whether to render a progress bar tracking the
                 iterator's progress
             autosave (False): whether to automatically save changes to samples
                 emitted by this iterator
@@ -8218,6 +8218,7 @@ class SampleCollection(object):
         include_frames=False,
         frame_labels_dir=None,
         pretty_print=False,
+        progress=None,
     ):
         """Returns a JSON dictionary representation of the collection.
 
@@ -8242,6 +8243,8 @@ class SampleCollection(object):
                 readable format with newlines and indentations. Only applicable
                 to datasets that contain videos when a ``frame_labels_dir`` is
                 provided
+            progress (None): whether to render a progress bar tracking the
+                iterator's progress of the sample serialization
 
         Returns:
             a JSON dict
@@ -8297,7 +8300,7 @@ class SampleCollection(object):
 
         # Serialize samples
         samples = []
-        for sample in view.iter_samples(progress=True):
+        for sample in view.iter_samples(progress=progress):
             sd = sample.to_dict(
                 include_frames=include_frames,
                 include_private=include_private,

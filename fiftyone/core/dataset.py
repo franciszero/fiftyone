@@ -2016,7 +2016,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         self._doc.save()
 
-    def iter_samples(self, progress=False, autosave=False, batch_size=None):
+    def iter_samples(self, progress=None, autosave=False, batch_size=None):
         """Returns an iterator over the samples in the dataset.
 
         Examples::
@@ -2050,7 +2050,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                 sample.ground_truth.label = make_label()
 
         Args:
-            progress (False): whether to render a progress bar tracking the
+            progress (None): whether to render a progress bar tracking the
                 iterator's progress
             autosave (False): whether to automatically save changes to samples
                 emitted by this iterator
@@ -2064,10 +2064,9 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         with contextlib.ExitStack() as exit_context:
             samples = self._iter_samples()
 
-            if progress:
-                pb = fou.ProgressBar(total=len(self))
-                exit_context.enter_context(pb)
-                samples = pb(samples)
+            pb = fou.ProgressBar(total=len(self), progress=progress)
+            exit_context.enter_context(pb)
+            samples = pb(samples)
 
             if autosave:
                 save_context = foc.SaveContext(self, batch_size=batch_size)
@@ -2110,7 +2109,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
     def iter_groups(
         self,
         group_slices=None,
-        progress=False,
+        progress=None,
         autosave=False,
         batch_size=None,
     ):
@@ -2151,7 +2150,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         Args:
             group_slices (None): an optional subset of group slices to load
-            progress (False): whether to render a progress bar tracking the
+            progress (None): whether to render a progress bar tracking the
                 iterator's progress
             autosave (False): whether to automatically save changes to samples
                 emitted by this iterator
@@ -2169,10 +2168,9 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         with contextlib.ExitStack() as exit_context:
             groups = self._iter_groups(group_slices=group_slices)
 
-            if progress:
-                pb = fou.ProgressBar(total=len(self))
-                exit_context.enter_context(pb)
-                groups = pb(groups)
+            pb = fou.ProgressBar(total=len(self), progress=progress)
+            exit_context.enter_context(pb)
+            groups = pb(groups)
 
             if autosave:
                 save_context = foc.SaveContext(self, batch_size=batch_size)
@@ -2314,6 +2312,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         dynamic=False,
         validate=True,
         num_samples=None,
+        progress=None,
     ):
         """Adds the given samples to the dataset.
 
@@ -2335,6 +2334,9 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             num_samples (None): the number of samples in ``samples``. If not
                 provided, this is computed via ``len(samples)``, if possible.
                 This value is optional and is used only for progress tracking
+            progress (None): whether to show the progress bar of the import.
+                If None this uses the global setting, otherwise it overwrites
+                the setting for this method.
 
         Returns:
             a list of IDs of the samples in the dataset
@@ -2352,7 +2354,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             target_latency=0.2,
             init_batch_size=1,
             max_batch_beta=2.0,
-            progress=True,
+            progress=progress,
             total=num_samples,
         )
 
@@ -2372,6 +2374,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         include_info=True,
         overwrite_info=False,
         new_ids=False,
+        progress=None,
     ):
         """Adds the contents of the given collection to the dataset.
 
@@ -2390,6 +2393,9 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                 information. Only applicable when ``include_info`` is True
             new_ids (False): whether to generate new sample/frame IDs. By
                 default, the IDs of the input collection are retained
+            progress (None): whether to show the progress bar of the import.
+                If None this uses the global setting, otherwise it overwrites
+                the setting for this method.
 
         Returns:
             a list of IDs of the samples that were added to this dataset
@@ -2410,6 +2416,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             insert_new=True,
             include_info=include_info,
             overwrite_info=overwrite_info,
+            progress=progress,
         )
         return self.skip(num_samples).values("id")
 
@@ -2449,6 +2456,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         dynamic=False,
         validate=True,
         num_samples=None,
+        progress=None,
     ):
         if num_samples is None:
             try:
@@ -2463,7 +2471,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             target_latency=0.2,
             init_batch_size=1,
             max_batch_beta=2.0,
-            progress=True,
+            progress=progress,
         )
 
         with batcher:
@@ -2571,6 +2579,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         include_info=True,
         overwrite_info=False,
         num_samples=None,
+        progress=None,
     ):
         """Merges the given samples into this dataset.
 
@@ -2657,6 +2666,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             num_samples (None): the number of samples in ``samples``. If not
                 provided, this is computed via ``len(samples)``, if possible.
                 This value is optional and is used only for progress tracking
+            progress (None): whether to render a progress bar tracking the
+                progress
         """
         if fields is not None:
             if etau.is_str(fields):
@@ -2710,7 +2721,10 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
             try:
                 tmp.add_samples(
-                    samples, dynamic=dynamic, num_samples=num_samples
+                    samples,
+                    dynamic=dynamic,
+                    num_samples=num_samples,
+                    progress=progress,
                 )
 
                 self.merge_samples(
@@ -2744,6 +2758,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             expand_schema=expand_schema,
             dynamic=dynamic,
             num_samples=num_samples,
+            progress=progress,
         )
 
     def delete_samples(self, samples_or_ids):
@@ -7139,6 +7154,7 @@ def _merge_samples_python(
     expand_schema=True,
     dynamic=False,
     num_samples=None,
+    progress=None,
 ):
     if (
         isinstance(samples, foc.SampleCollection)
@@ -7161,7 +7177,7 @@ def _merge_samples_python(
     else:
         id_map = {}
         logger.info("Indexing dataset...")
-        for sample in dst.iter_samples(progress=True):
+        for sample in dst.iter_samples(progress=progress):
             id_map[key_fcn(sample)] = sample._id
 
     _samples = _make_merge_samples_generator(
@@ -7184,6 +7200,7 @@ def _merge_samples_python(
         expand_schema=expand_schema,
         dynamic=dynamic,
         num_samples=num_samples,
+        progress=progress,
     )
 
 
