@@ -15,8 +15,11 @@ import eta.core.serial as etas
 import eta.core.utils as etau
 import strawberry as gql
 from bson import ObjectId, json_util
+import eta.core.utils as etau
 
 import fiftyone as fo
+import fiftyone.brain.internal.core.similarity as fobs
+import fiftyone.brain.internal.core.visualization as fobv
 import fiftyone.constants as foc
 import fiftyone.core.context as focx
 import fiftyone.core.dataset as fod
@@ -83,12 +86,30 @@ class Run:
     view_stages: t.Optional[t.List[str]]
 
 
+@gql.enum
+class BrainRunType(Enum):
+    similarity = "similarity"
+    visualization = "visualization"
+
+
 @gql.type
 class BrainRunConfig(RunConfig):
     embeddings_field: t.Optional[str]
     method: t.Optional[str]
     patches_field: t.Optional[str]
     supports_prompts: t.Optional[bool]
+
+    @gql.field
+    def type(self) -> t.Optional[BrainRunType]:
+        if issubclass(fobs.SimilarityConfig, etau.get_class(self.cls)):
+            return BrainRunType.similarity
+
+        if issubclass(
+            fobv.ManualVisualizationConfig, etau.get_class(self.cls)
+        ):
+            return BrainRunType.visualization
+
+        return None
 
 
 @gql.type
