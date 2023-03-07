@@ -21,7 +21,6 @@ const showEntryCounts = selectorFamily<
       if (
         params.modal ||
         params.path === "" ||
-        params.path.split(".")[0] === "tags" ||
         mode === "all" ||
         get(pathIsExpanded(params))
       ) {
