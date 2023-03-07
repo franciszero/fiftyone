@@ -1,7 +1,7 @@
 """
 FiftyOne datasets.
 
-| Copyright 2017-2022, Voxel51, Inc.
+| Copyright 2017-2023, Voxel51, Inc.
 | `voxel51.com <https://voxel51.com/>`_
 |
 """
@@ -17,6 +17,7 @@ import random
 import string
 
 from bson import json_util, ObjectId
+import cachetools
 from deprecated import deprecated
 import mongoengine.errors as moe
 from pymongo import DeleteMany, InsertOne, ReplaceOne, UpdateMany, UpdateOne
@@ -278,9 +279,9 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         self._group_slice = doc.default_group_slice
 
-        self._annotation_cache = {}
-        self._brain_cache = {}
-        self._evaluation_cache = {}
+        self._annotation_cache = cachetools.LRUCache(5)
+        self._brain_cache = cachetools.LRUCache(5)
+        self._evaluation_cache = cachetools.LRUCache(5)
 
         self._deleted = False
 
@@ -805,17 +806,17 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
     @property
     def mask_targets(self):
         """A dict mapping field names to mask target dicts, each of which
-        defines a mapping between pixel values and label strings for the
-        segmentation masks in the corresponding field of the dataset.
-
-        .. note::
-
-            The pixel value `0` is a reserved "background" class that is
-            rendered as invisible in the App.
+        defines a mapping between pixel values (2D masks) or RGB hex strings
+        (3D masks) and label strings for the segmentation masks in the
+        corresponding field of the dataset.
 
         Examples::
 
             import fiftyone as fo
+
+            #
+            # 2D masks
+            #
 
             dataset = fo.Dataset()
 
@@ -825,8 +826,31 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                 "predictions": {1: "cat", 2: "dog", 255: "other"},
             }
 
+            # Or, for RGB mask targets
+            dataset.mask_targets = {
+                "segmentations": {"#3f0a44": "road", "#eeffee": "building", "#ffffff": "other"}
+            }
+
             # Edit an existing mask target
             dataset.mask_targets["ground_truth"][255] = "other"
+            dataset.save()  # must save after edits
+
+            #
+            # 3D masks
+            #
+
+            dataset = fo.Dataset()
+
+            # Set mask targets for the `ground_truth` and `predictions` fields
+            dataset.mask_targets = {
+                "ground_truth": {"#499CEF": "cat", "#6D04FF": "dog"},
+                "predictions": {
+                    "#499CEF": "cat", "#6D04FF": "dog", "#FF6D04": "person"
+                },
+            }
+
+            # Edit an existing mask target
+            dataset.mask_targets["ground_truth"]["#FF6D04"] = "person"
             dataset.save()  # must save after edits
         """
         return self._doc.mask_targets
@@ -838,27 +862,43 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
     @property
     def default_mask_targets(self):
-        """A dict defining a default mapping between pixel values and label
-        strings for the segmentation masks of all
-        :class:`fiftyone.core.labels.Segmentation` fields of this dataset that
-        do not have customized mask targets defined in :meth:`mask_targets`.
-
-        .. note::
-
-            The pixel value `0` is a reserved "background" class that is
-            rendered as invisible in the App.
+        """A dict defining a default mapping between pixel values (2D masks) or
+        RGB hex strings (3D masks) and label strings for the segmentation masks
+        of all :class:`fiftyone.core.labels.Segmentation` fields of this
+        dataset that do not have customized mask targets defined in
+        :meth:`mask_targets`.
 
         Examples::
 
             import fiftyone as fo
+
+            #
+            # 2D masks
+            #
 
             dataset = fo.Dataset()
 
             # Set default mask targets
             dataset.default_mask_targets = {1: "cat", 2: "dog"}
 
+            # Or, for RGB mask targets
+            dataset.default_mask_targets = {"#3f0a44": "road", "#eeffee": "building", "#ffffff": "other"}
+
             # Edit the default mask targets
             dataset.default_mask_targets[255] = "other"
+            dataset.save()  # must save after edits
+
+            #
+            # 3D masks
+            #
+
+            dataset = fo.Dataset()
+
+            # Set default mask targets
+            dataset.default_mask_targets = {"#499CEF": "cat", "#6D04FF": "dog"}
+
+            # Edit the default mask targets
+            dataset.default_mask_targets["#FF6D04"] = "person"
             dataset.save()  # must save after edits
         """
         return self._doc.default_mask_targets
@@ -1023,8 +1063,13 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             total_bytes += frames_bytes
 
         if include_media:
-            self.compute_metadata()
-            media_bytes = self.sum("metadata.size_bytes")
+            if self.media_type == fom.GROUP:
+                samples = self.select_group_slices(_allow_mixed=True)
+            else:
+                samples = self
+
+            samples.compute_metadata()
+            media_bytes = samples.sum("metadata.size_bytes")
             stats["media_bytes"] = media_bytes
             stats["media_size"] = etau.to_human_bytes_str(media_bytes)
             total_bytes += media_bytes
@@ -1330,6 +1375,24 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             self._reload()
             self._reload_sample_docs(hard=True)
 
+    def _merge_sample_field_schema(
+        self,
+        schema,
+        expand_schema=True,
+        recursive=True,
+        validate=True,
+    ):
+        expanded = self._sample_doc_cls.merge_field_schema(
+            schema,
+            expand_schema=expand_schema,
+            recursive=recursive,
+            validate=validate,
+        )
+
+        if expanded:
+            self._reload()
+            self._reload_sample_docs(hard=True)
+
     def add_dynamic_sample_fields(self, fields=None, add_mixed=False):
         """Adds all dynamic sample fields to the dataset's schema.
 
@@ -1359,11 +1422,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             elif field is not None:
                 schema[path] = field
 
-        expanded = self._sample_doc_cls.merge_field_schema(schema)
-
-        if expanded:
-            self._reload()
-            self._reload_sample_docs(hard=True)
+        self._merge_sample_field_schema(schema)
 
     def add_frame_field(
         self,
@@ -1444,6 +1503,24 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             self._reload()
             self._reload_frame_docs(hard=True)
 
+    def _merge_frame_field_schema(
+        self,
+        schema,
+        expand_schema=True,
+        recursive=True,
+        validate=True,
+    ):
+        expanded = self._frame_doc_cls.merge_field_schema(
+            schema,
+            expand_schema=expand_schema,
+            recursive=recursive,
+            validate=validate,
+        )
+
+        if expanded:
+            self._reload()
+            self._reload_frame_docs(hard=True)
+
     def add_dynamic_frame_fields(self, fields=None, add_mixed=False):
         """Adds all dynamic frame fields to the dataset's schema.
 
@@ -1478,11 +1555,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             elif field is not None:
                 schema[path] = field
 
-        expanded = self._frame_doc_cls.merge_field_schema(schema)
-
-        if expanded:
-            self._reload()
-            self._reload_frame_docs(hard=True)
+        self._merge_frame_field_schema(schema)
 
     def add_group_field(
         self, field_name, default=None, description=None, info=None
@@ -2104,7 +2177,13 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             for sample in self._iter_samples(pipeline=pipeline):
                 yield sample
 
-    def iter_groups(self, progress=False, autosave=False, batch_size=None):
+    def iter_groups(
+        self,
+        group_slices=None,
+        progress=False,
+        autosave=False,
+        batch_size=None,
+    ):
         """Returns an iterator over the groups in the dataset.
 
         Examples::
@@ -2141,6 +2220,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                     sample["test"] = make_label()
 
         Args:
+            group_slices (None): an optional subset of group slices to load
             progress (False): whether to render a progress bar tracking the
                 iterator's progress
             autosave (False): whether to automatically save changes to samples
@@ -2157,7 +2237,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             raise ValueError("%s does not contain groups" % type(self))
 
         with contextlib.ExitStack() as exit_context:
-            groups = self._iter_groups()
+            groups = self._iter_groups(group_slices=group_slices)
 
             if progress:
                 pb = fou.ProgressBar(total=len(self))
@@ -2175,7 +2255,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                     for sample in group.values():
                         save_context.save(sample)
 
-    def _iter_groups(self, pipeline=None):
+    def _iter_groups(self, group_slices=None, pipeline=None):
         index = 0
 
         group_field = self.group_field
@@ -2183,7 +2263,12 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         group = {}
 
         try:
-            for d in self._aggregate(pipeline=pipeline, groups_only=True):
+            for d in self._aggregate(
+                detach_frames=True,
+                pipeline=pipeline,
+                group_slices=group_slices,
+                groups_only=True,
+            ):
                 sample = self._make_sample(d)
 
                 group_id = sample[group_field].id
@@ -2210,14 +2295,17 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             # The cursor has timed out so we yield from a new one after
             # skipping to the last offset
             pipeline = [{"$skip": index}] + (pipeline or [])
-            for group in self._iter_groups(pipeline=pipeline):
+            for group in self._iter_groups(
+                group_slices=group_slices, pipeline=pipeline
+            ):
                 yield group
 
-    def get_group(self, group_id):
+    def get_group(self, group_id, group_slices=None):
         """Returns a dict containing the samples for the given group ID.
 
         Args:
             group_id: a group ID
+            group_slices (None): an optional subset of group slices to load
 
         Returns:
             a dict mapping group names to :class:`fiftyone.core.sample.Sample`
@@ -2244,7 +2332,13 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         ]
 
         try:
-            return next(iter(self._iter_groups(pipeline=pipeline)))
+            return next(
+                iter(
+                    self._iter_groups(
+                        group_slices=group_slices, pipeline=pipeline
+                    )
+                )
+            )
         except StopIteration:
             raise KeyError(
                 "No group found with ID '%s' in field '%s'"
@@ -3208,7 +3302,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             overwrite (False): whether to overwrite an existing saved view with
                 the same name
         """
-        if view._root_dataset is not self:
+        if view._root_dataset._doc.id != self._doc.id:
             raise ValueError("Cannot save view into a different dataset")
 
         view._set_name(name)
@@ -3305,7 +3399,10 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             view_doc.last_modified_at = datetime.utcnow()
             view_doc.save()
 
-    def load_saved_view(self, name):
+    def load_saved_view(
+        self,
+        name,
+    ):
         """Loads the saved view with the given name.
 
         Examples::
@@ -3329,10 +3426,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             a :class:`fiftyone.core.view.DatasetView`
         """
         view_doc = self._get_saved_view_doc(name)
-
-        stage_dicts = [json_util.loads(s) for s in view_doc.view_stages]
-        view = fov.DatasetView._build(self, stage_dicts)
-        view._set_name(name)
+        view = self._load_saved_view_from_doc(view_doc)
 
         view_doc.last_loaded_at = datetime.utcnow()
         view_doc.save()
@@ -3360,10 +3454,12 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         self._doc.saved_views = []
         self._doc.save()
 
-    def _get_saved_view_doc(self, name, pop=False):
+    def _get_saved_view_doc(self, name, pop=False, slug=False):
         idx = None
+        key = "slug" if slug else "name"
+
         for i, view_doc in enumerate(self._doc.saved_views):
-            if name == view_doc.name:
+            if name == getattr(view_doc, key):
                 idx = i
                 break
 
@@ -3375,9 +3471,15 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         return self._doc.saved_views[idx]
 
+    def _load_saved_view_from_doc(self, view_doc):
+        stage_dicts = [json_util.loads(s) for s in view_doc.view_stages]
+        name = getattr(view_doc, "name")
+        view = fov.DatasetView._build(self, stage_dicts)
+        view._set_name(name)
+        return view
+
     def _validate_saved_view_name(self, name, skip=None, overwrite=False):
         slug = fou.to_slug(name)
-
         for view_doc in self._doc.saved_views:
             if view_doc is skip:
                 continue
@@ -3744,7 +3846,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                 -   a folder name like ``"data"`` or ``"data/"`` specifying a
                     subfolder of ``dataset_dir`` in which the media lies
                 -   an absolute directory path in which the media lies. In this
-                    case, the ``export_dir`` has no effect on the location of
+                    case, the ``dataset_dir`` has no effect on the location of
                     the data
                 -   a filename like ``"data.json"`` specifying the filename of
                     a JSON manifest file in ``dataset_dir`` that maps UUIDs to
@@ -3905,7 +4007,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                 -   a folder name like ``"data"`` or ``"data/"`` specifying a
                     subfolder of ``dataset_dir`` in which the media lies
                 -   an absolute directory path in which the media lies. In this
-                    case, the ``export_dir`` has no effect on the location of
+                    case, the ``dataset_dir`` has no effect on the location of
                     the data
                 -   a filename like ``"data.json"`` specifying the filename of
                     a JSON manifest file in ``dataset_dir`` that maps UUIDs to
@@ -5015,7 +5117,7 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
                 -   a folder name like ``"data"`` or ``"data/"`` specifying a
                     subfolder of ``dataset_dir`` in which the media lies
                 -   an absolute directory path in which the media lies. In this
-                    case, the ``export_dir`` has no effect on the location of
+                    case, the ``dataset_dir`` has no effect on the location of
                     the data
                 -   a filename like ``"data.json"`` specifying the filename of
                     a JSON manifest file in ``dataset_dir`` that maps UUIDs to
@@ -5666,8 +5768,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         support=None,
         group_slice=None,
         group_slices=None,
-        groups_only=False,
         detach_groups=False,
+        groups_only=False,
         manual_group_select=False,
         post_pipeline=None,
     ):
@@ -5706,8 +5808,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         if media_type != fom.GROUP:
             group_slices = None
-            groups_only = False
             detach_groups = False
+            groups_only = False
 
         if groups_only:
             detach_groups = False
@@ -5752,7 +5854,9 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         if detach_groups:
             _pipeline.append({"$project": {"groups": False}})
         elif groups_only:
-            _pipeline.extend(self._groups_only_pipeline())
+            _pipeline.extend(
+                self._groups_only_pipeline(group_slices=group_slices)
+            )
 
         if post_pipeline is not None:
             _pipeline.extend(post_pipeline)
@@ -5991,8 +6095,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         support=None,
         group_slice=None,
         group_slices=None,
-        groups_only=False,
         detach_groups=False,
+        groups_only=False,
         manual_group_select=False,
         post_pipeline=None,
     ):
@@ -6007,8 +6111,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
             support=support,
             group_slice=group_slice,
             group_slices=group_slices,
-            groups_only=groups_only,
             detach_groups=detach_groups,
+            groups_only=groups_only,
             manual_group_select=manual_group_select,
             post_pipeline=post_pipeline,
         )
@@ -6257,6 +6361,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
         self._reload(hard=True)
         self._reload_docs(hard=True)
 
+    def clear_cache(self):
+        """Clears the dataset's in-memory cache."""
         self._annotation_cache.clear()
         self._brain_cache.clear()
         self._evaluation_cache.clear()
@@ -6276,6 +6382,8 @@ class Dataset(foc.SampleCollection, metaclass=DatasetSingleton):
 
         if self._group_slice is None:
             self._group_slice = doc.default_group_slice
+
+        self._deleted = False
 
         self._update_last_loaded_at()
 
