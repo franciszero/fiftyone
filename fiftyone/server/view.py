@@ -496,7 +496,7 @@ def _make_filter_stages(
 
             match_exprs.append(expr)
 
-        if match_exprs and is_matching:
+        if match_exprs:
             matcher = F.all if exclude else F.any
             stages.append(fosg.Match(matcher(match_exprs)))
 
