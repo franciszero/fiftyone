@@ -14,5 +14,6 @@ print(dataset)
 sample = dataset.first()
 print(sample.ground_truth.detections[0])
 
-session = fo.launch_app(view=dataset)
+session = fo.launch_app(dataset)
+# View the dataset in the App
 session.wait()
