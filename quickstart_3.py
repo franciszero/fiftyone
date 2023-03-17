@@ -15,8 +15,6 @@ def rand_box():
     h = random.uniform(0, ly - ry)
     return [rx, ry, w, h]
 
-
-# Ex: your custom label format
 annotations = {
     "./test_data/Station_Beach/2022-08-31_09-50-16.jpg": [
         {"bbox": rand_box(), "label": '1'},
@@ -96,7 +94,6 @@ annotations = {
     ],
 }
 
-# Create samples for your data
 samples = []
 for filepath in glob.glob(images_patt):
     sample = fo.Sample(filepath=filepath)
@@ -128,7 +125,7 @@ dataset.persistent = False
 
 # Print a ground truth detection
 sample = dataset.first()
-print(sample.ground_truth.detections[0])
+print(dataset.first().ground_truth.detections[0])
 # <Detection: {
 #     'id': '64132149c7e419ef5f5e848f',
 #     'attributes': {},
